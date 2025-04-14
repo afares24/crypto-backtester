@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>Trading Engine - IronBull.io</title>
+
+  <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  
+  <script>
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+  
+  <!-- Navbar -->
+  <nav class="bg-gray-900 border-b border-gray-800 shadow-sm">
+    <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="flex items-center space-x-2">
+        <img src="static/trading_bull.png" alt="Logo" class="w-12 h-12 rounded-full">
+        <span class="text-2xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+          IronBull.io
+        </span>
+      </a>
+      <div class="space-x-6 text-sm">
+        <a href="/" class="text-gray-400 hover:text-white transition" hx-get="/" hx-target="body" hx-swap="outerHTML">Home</a>
+        <a href="/trading-engine" class="text-gray-400 hover:text-white transition" hx-get="/trading-engine" hx-target="body" hx-swap="outerHTML">Trading Engine</a>
+        <a href="#" class="text-gray-400 hover:text-white transition">Leaderboards</a>
+        <a href="#" class="text-gray-400 hover:text-white transition">Starter Kit</a>
+      </div>
+    </div>
+  </nav>
+  
+  <main class="flex-grow px-4 py-10">
+    <div class="max-w-7xl mx-auto bg-gray-800 border border-gray-700 shadow-lg rounded-xl overflow-hidden transform hover:scale-[1.01] transition-transform duration-300">
+      <iframe 
+        src="http://localhost:8501" 
+        class="w-full h-[800px] border-0" 
+        title="Trading Engine Backtester">
+      </iframe>
+    </div>
+  </main>
+  
+  <!-- Footer -->
+  <footer class="bg-gray-900 border-t border-gray-800 mt-10 py-6 text-center text-sm text-gray-500">
+    <div class="container mx-auto">
+      <p>© 2025 IronBull.io. All rights reserved.</p>
+    </div>
+  </footer>
+  
+</body>
+</html>
