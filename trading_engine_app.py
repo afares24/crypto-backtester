@@ -5,6 +5,7 @@ import requests
 from datetime import date
 from pathlib import Path
 import altair as alt
+from data.yf_data import stock_history
 
 project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
@@ -25,7 +26,7 @@ hide_streamlit_style = """
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# Custom styling
+# page styling
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -58,9 +59,19 @@ body {
 </style>
 """, unsafe_allow_html=True)
 
+# gradient on header not working
 st.markdown("""
+<style>
+.gradient-text {
+    background: linear-gradient(to right, #ffffff 30%, #9ca3af 70%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    font-size: 2.5rem !important;
+    font-weight: 800 !important;
+}
+</style>
 <div style="margin-bottom: 2rem;">
-    <h1 style="font-size: 2.5rem; font-weight: 800;">Trading Engine</h1>
+    <h1 class="gradient-text">Trading Engine</h1>
     <p style="color: #9CA3AF; font-size: 1.1rem; margin-top: 0.5rem;">
         Select your stock and timeframe in the sidebar, then adjust the technical indicator settings below to simulate your potential trading returns.
     </p>
@@ -69,23 +80,36 @@ st.markdown("""
 
 # Sidebar
 st.sidebar.header("Data Parameters")
-symbol = st.sidebar.selectbox("Stock Symbol", options=["AAPL", "TSLA", "MSFT", "AMZN", "NVDA", "NFLX", "V", "GOOGL"])
-period = st.sidebar.selectbox("Period", options=["None", "1d", "5d", "1mo", "3mo", "6mo", "1y"], index=0)
-interval = st.sidebar.selectbox("Interval", options=["1d", "1h", "30m", "15m", "5m"])
+asset_type = st.sidebar.radio("Asset Type", options=["Crypto", "Stocks"], horizontal=True)
 
-if period == "None":
+stock_symbols = ["AAPL", "TSLA", "MSFT", "AMZN", "NVDA", "NFLX", "V", "GOOGL", "META", "INTC", "IBM"]
+crypto_symbols = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "XRP-USD", "DOGE-USD", "BNB-USD", "AVAX-USD", "DOT-USD"]
+
+if asset_type == "Stocks":
+    symbols = stock_symbols
+else:
+    symbols = crypto_symbols
+
+symbol = st.sidebar.selectbox("Ticker", options=symbols)
+
+period_options = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "Custom"]
+period = st.sidebar.selectbox("Period", options=period_options, index=0)
+
+valid_intervals = ["1d", "1wk", "1mo"]
+
+interval = st.sidebar.selectbox("Interval", options=valid_intervals)
+
+if period == "Custom":
     start_date = st.sidebar.date_input("Start Date", value=date(2025, 1, 1))
     end_date = st.sidebar.date_input("End Date", value=date(2025, 1, 31))
 else:
     start_date = None
     end_date = None
 
-# Move Preview Price Chart button here
 preview_price = st.sidebar.button("Preview Price Chart")
 
 if preview_price:
     try:
-        from data.yf_data import stock_history
 
         start_str = str(start_date) if start_date else None
         end_str = str(end_date) if end_date else None
@@ -93,10 +117,10 @@ if preview_price:
         with st.spinner("Fetching data..."):
             data = stock_history(
                 symbol,
-                period if period != "None" else None,
+                None if period == "Custom" else period,
                 interval,
-                start_str,
-                end_str
+                start_str if period == "Custom" else None,
+                end_str if period == "Custom" else None
             )
 
         if isinstance(data, list):
@@ -112,7 +136,6 @@ if preview_price:
         if data.empty:
             st.warning("No data returned. Please adjust your parameters.")
         else:
-            st.success("Data fetched successfully!")
             st.subheader(f"{symbol} Price Preview")
             price_chart = alt.Chart(data).mark_line().encode(
                 x="Date:T",
@@ -130,12 +153,12 @@ if preview_price:
 with st.container():
     st.subheader("Strategy Configuration")
 
-    # SMA
-    use_sma = st.checkbox("SMA", value=True)
-    if use_sma:
-        with st.expander("Simple Moving Average Settings", expanded=True):
-            sma_period = st.slider("SMA Period", 5, 100, 20)
-            sma_source = st.selectbox("SMA Source", ["Close", "Open", "High", "Low"])
+    # Moving Average Crossover
+    use_crossover = st.checkbox("Moving Average Crossover", value=False)
+    if use_crossover:
+        with st.expander("Crossover Settings", expanded=True):
+            fast_period = st.slider("Fast MA Period", 5, 50, 10)
+            slow_period = st.slider("Slow MA Period", 10, 200, 50)
 
     # RSI
     use_rsi = st.checkbox("RSI", value=False)
@@ -160,7 +183,7 @@ with st.container():
             bbands_period = st.slider("BBands Period", 5, 100, 20)
             bbands_stddev = st.slider("BBands Std Dev", 1.0, 5.0, 2.0, step=0.1)
 
-    with st.expander("Trade Settings", expanded=True):
+    with st.expander("Trade Settings", expanded=False):
         take_profit = st.slider("Take Profit (%)", 1, 100, 10)
         stop_loss = st.slider("Stop Loss (%)", 1, 100, 5)
 
@@ -185,10 +208,10 @@ if run_button:
         with st.spinner("Fetching data..."):
             data = stock_history(
                 symbol,
-                period if period != "None" else None,
+                None if period == "Custom" else period,
                 interval,
-                start_str,
-                end_str
+                start_str if period == "Custom" else None,
+                end_str if period == "Custom" else None
             )
 
         if isinstance(data, list):
@@ -204,13 +227,11 @@ if run_button:
         if data.empty:
             st.warning("No data returned. Please adjust your parameters.")
         else:
-            st.success("Data fetched successfully!")
-
             strategy_settings = {
-                "sma": {
-                    "enabled": use_sma,
-                    "period": sma_period if use_sma else None,
-                    "source": sma_source.lower() if use_sma else None
+                "ma_crossover": {
+                    "enabled": use_crossover,
+                    "fast": fast_period if use_crossover else None,
+                    "slow": slow_period if use_crossover else None,
                 },
                 "rsi": {
                     "enabled": use_rsi,
@@ -254,10 +275,9 @@ if run_button:
             chart_df = chart_df.set_index("date")
 
             st.subheader("Backtest Results")
-            st.line_chart(chart_df[["close"] +
-                (["sma"] if use_sma and "sma" in chart_df.columns else []) +
-                (["macd", "macd_signal"] if use_macd and "macd" in chart_df.columns else []) +
-                (["bb_upper", "bb_lower"] if use_bbands and "bb_upper" in chart_df.columns else [])
-            ])
+            ma_columns = []
+            if "ma_fast" in chart_df.columns and "ma_slow" in chart_df.columns:
+                ma_columns = ["ma_fast", "ma_slow"]
+            st.line_chart(chart_df[["close"] + ma_columns])
     except Exception as e:
         st.error(f"Error running strategy: {e}")

@@ -41,9 +41,9 @@ struct PriceRecord {
 #[derive(Deserialize)]
 struct Indicators {
     rsi: RSISettings,
-    sma: SMASettings,
     macd: MACDSettings,
     bbands: BBandSettings,
+    ma_crossover: MACrossoverSettings,
 }
 
 #[derive(Deserialize)]
@@ -62,17 +62,19 @@ struct RSISettings {
 }
 
 #[derive(Deserialize)]
-struct SMASettings {
-    enabled: bool,
-    period: Option<u32>,
-}
-
-#[derive(Deserialize)]
 struct MACDSettings {
     enabled: bool,
     fast: Option<u32>,
     slow: Option<u32>,
     signal: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct MACrossoverSettings {
+    enabled: bool,
+    fast: Option<u32>,
+    slow: Option<u32>,
+    source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -95,8 +97,6 @@ struct ChartData {
     #[serde(skip_serializing_if = "Option::is_none")]
     rsi: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    sma: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     macd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     macd_signal: Option<f64>,
@@ -104,31 +104,23 @@ struct ChartData {
     bb_upper: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bb_lower: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ma_fast: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ma_slow: Option<f64>,
 }
 
 async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> {
     let mut rsi_values = Vec::new();
     let mut chart_data = Vec::new();
 
-    let mut sma_opt = None;
-    if payload.indicators.sma.enabled {
-        let period = payload.indicators.sma.period.unwrap_or(20);
-        sma_opt = Some(SimpleMovingAverage::new(period.try_into().unwrap()).unwrap());
-    }
-
-    let mut macd_opt = None;
-    if payload.indicators.macd.enabled {
-        let fast = payload.indicators.macd.fast.unwrap_or(12);
-        let slow = payload.indicators.macd.slow.unwrap_or(26);
-        let signal = payload.indicators.macd.signal.unwrap_or(9);
-        macd_opt = Some(Macd::new(fast.try_into().unwrap(), slow.try_into().unwrap(), signal.try_into().unwrap()).unwrap());
-    }
-
-    let mut bbands_opt = None;
-    if payload.indicators.bbands.enabled {
-        let period = payload.indicators.bbands.period.unwrap_or(20);
-        let std_dev = payload.indicators.bbands.std_dev.unwrap_or(2.0);
-        bbands_opt = Some(BollingerBands::new(period.try_into().unwrap(), std_dev).unwrap());
+    let mut ma_fast_opt = None;
+    let mut ma_slow_opt = None;
+    if payload.indicators.ma_crossover.enabled {
+        let fast = payload.indicators.ma_crossover.fast.unwrap_or(10);
+        let slow = payload.indicators.ma_crossover.slow.unwrap_or(50);
+        ma_fast_opt = Some(SimpleMovingAverage::new(fast.try_into().unwrap()).unwrap());
+        ma_slow_opt = Some(SimpleMovingAverage::new(slow.try_into().unwrap()).unwrap());
     }
 
     let mut rsi = if payload.indicators.rsi.enabled {
@@ -137,13 +129,50 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
         None
     };
 
+    let mut macd_opt = None;
+    if payload.indicators.macd.enabled {
+        let fast = payload.indicators.macd.fast.unwrap_or(12);
+        let slow = payload.indicators.macd.slow.unwrap_or(26);
+        let signal = payload.indicators.macd.signal.unwrap_or(9);
+        macd_opt = Some(Macd::new(
+            fast.try_into().unwrap(),
+            slow.try_into().unwrap(),
+            signal.try_into().unwrap()
+        ).unwrap());
+    }
+    let mut bbands_opt = None;
+    if payload.indicators.bbands.enabled {
+        let period = payload.indicators.bbands.period.unwrap_or(20);
+        let std_dev = payload.indicators.bbands.std_dev.unwrap_or(2.0);
+        bbands_opt = Some(BollingerBands::new(
+            period.try_into().unwrap(),
+            std_dev
+        ).unwrap());
+    }
+
     for record in &payload.price_data {
         let mut rsi_val = None;
-        let mut sma_val = None;
         let mut macd_val = None;
         let mut macd_sig_val = None;
         let mut bb_upper = None;
         let mut bb_lower = None;
+
+        let source_price = match payload.indicators.ma_crossover.source.as_deref() {
+            Some("open") => record.Open,
+            Some("high") => record.High,
+            Some("low") => record.Low,
+            _ => record.Close,
+        };
+
+        let mut ma_fast_val = None;
+        let mut ma_slow_val = None;
+
+        if let Some(ind) = &mut ma_fast_opt {
+            ma_fast_val = Some(ind.next(source_price));
+        }
+        if let Some(ind) = &mut ma_slow_opt {
+            ma_slow_val = Some(ind.next(source_price));
+        }
 
         if let Some(ind) = &mut rsi {
             let v = ind.next(record.Close);
@@ -152,10 +181,6 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
                 rsi: v,
             });
             rsi_val = Some(v);
-        }
-
-        if let Some(ind) = &mut sma_opt {
-            sma_val = Some(ind.next(record.Close));
         }
 
         if let Some(ind) = &mut macd_opt {
@@ -174,15 +199,16 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
             date: record.Date.clone(),
             close: record.Close,
             rsi: rsi_val,
-            sma: sma_val,
             macd: macd_val,
             macd_signal: macd_sig_val,
             bb_upper,
             bb_lower,
+            ma_fast: ma_fast_val,
+            ma_slow: ma_slow_val,
         });
     }
 
-    let sma_enabled = payload.indicators.sma.enabled;
+    let crossover_enabled = payload.indicators.ma_crossover.enabled;
     let rsi_enabled = payload.indicators.rsi.enabled;
     let macd_enabled = payload.indicators.macd.enabled;
 
@@ -194,9 +220,27 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
         let prev = &chart_data[i - 1];
         let curr = &chart_data[i];
 
-        let buy_sma = if sma_enabled {
-            if let (Some(sma_prev), Some(sma_curr)) = (prev.sma, curr.sma) {
-                (prev.close < sma_prev) && (curr.close > sma_curr)
+        let buy_cross = if crossover_enabled {
+            if let (Some(fast_prev), Some(slow_prev)) = (prev.ma_fast, prev.ma_slow) {
+                if let (Some(fast_curr), Some(slow_curr)) = (curr.ma_fast, curr.ma_slow) {
+                    (fast_prev < slow_prev) && (fast_curr > slow_curr)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+
+        let sell_cross = if crossover_enabled {
+            if let (Some(fast_prev), Some(slow_prev)) = (prev.ma_fast, prev.ma_slow) {
+                if let (Some(fast_curr), Some(slow_curr)) = (curr.ma_fast, curr.ma_slow) {
+                    (fast_prev > slow_prev) && (fast_curr < slow_curr)
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -229,34 +273,6 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
             true
         };
 
-        let mut buy_signals = vec![];
-        if sma_enabled {
-            buy_signals.push(buy_sma);
-        }
-        if rsi_enabled {
-            buy_signals.push(buy_rsi);
-        }
-        if macd_enabled {
-            buy_signals.push(buy_macd);
-        }
-        let buy_signal = if buy_signals.is_empty() {
-            false
-        } else if payload.trade_logic == TradeLogic::All {
-            buy_signals.iter().all(|&x| x)
-        } else {
-            buy_signals.iter().any(|&x| x)
-        };
-
-        let sell_sma = if sma_enabled {
-            if let (Some(sma_prev), Some(sma_curr)) = (prev.sma, curr.sma) {
-                (prev.close > sma_prev) && (curr.close < sma_curr)
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
         let sell_rsi = if rsi_enabled {
             if let (Some(rsi_prev), Some(rsi_curr)) = (prev.rsi, curr.rsi) {
                 let overbought = payload.indicators.rsi.overbought.unwrap_or(70.0);
@@ -282,9 +298,27 @@ async fn strategy_handler(Json(payload): Json<Payload>) -> Json<StrategyResult> 
             true
         };
 
+        let mut buy_signals = vec![];
+        if crossover_enabled {
+            buy_signals.push(buy_cross);
+        }
+        if rsi_enabled {
+            buy_signals.push(buy_rsi);
+        }
+        if macd_enabled {
+            buy_signals.push(buy_macd);
+        }
+        let buy_signal = if buy_signals.is_empty() {
+            false
+        } else if payload.trade_logic == TradeLogic::All {
+            buy_signals.iter().all(|&x| x)
+        } else {
+            buy_signals.iter().any(|&x| x)
+        };
+
         let mut sell_signals = vec![];
-        if sma_enabled {
-            sell_signals.push(sell_sma);
+        if crossover_enabled {
+            sell_signals.push(sell_cross);
         }
         if rsi_enabled {
             sell_signals.push(sell_rsi);
